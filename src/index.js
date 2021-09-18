@@ -22,7 +22,8 @@ async function getGameData(
     homeTeamName,
     awayTeamName,
     locationName,
-    field
+    field,
+    level
 ) {
     const data = {
         fields: {
@@ -33,6 +34,8 @@ async function getGameData(
             "Away Team": [await getOrCreateTeam(awayTeamName)],
             Location: [await getOrCreateLocation(locationName)],
             Field: field,
+            Level: level,
+            "Added by CLI": true,
         },
     };
 
@@ -53,10 +56,9 @@ async function getAirtableGameID(gameId) {
 }
 
 async function getOrCreateTeam(teamName) {
-    console.log(teamName)
     let response = await base("Teams")
         .select({
-            filterByFormula: "{Name} = \"" + teamName + "\"",
+            filterByFormula: 'UPPER({Name}) = UPPER("' + teamName + '")',
         })
         .all();
 
@@ -76,10 +78,9 @@ async function getOrCreateTeam(teamName) {
 }
 
 async function getOrCreateLocation(locationName) {
-    console.log(locationName)
     let response = await base("Locations")
         .select({
-            filterByFormula: "{Name} = \"" + locationName + "\"",
+            filterByFormula: 'UPPER({Name}) = UPPER("' + locationName + '")',
         })
         .all();
 
@@ -100,65 +101,85 @@ async function getOrCreateLocation(locationName) {
 
 async function processCSV(csvPath) {
     try {
-    let data = await csv().fromFile(csvPath);
-    let toAdd = [];
-    let toUpdate = [];
-    for (const index in data) {
-        game = data[index];
-        if (!game["Game #"]) {
-            continue;
+        let data = await csv().fromFile(csvPath);
+        let toAdd = [];
+        let toUpdate = [];
+        for (const index in data) {
+            game = data[index];
+            if (!game["Game #"]) {
+                continue;
+            }
+
+            let locationFieldArray = game["Location"].split(" - ");
+            let location = locationFieldArray.shift().toProperCase();
+            let field = locationFieldArray.join(" - ");
+            let level = game["Level"].split(" ")[0];
+            let position = "4th Offical";
+            if (isThisOffical(game["Official 1"])) {
+                position = "Center";
+            } else if (isThisOffical(game["Official 2"])) {
+                position = "AR1";
+            } else if (isThisOffical(game["Official 3"])) {
+                position = "AR2";
+            }
+            let date = new Date(
+                game["Date Time"].replace(datePattern, "20$3-$1-$2 $4:$5 $6") +
+                    " GMT-0600"
+            );
+
+            let gameData = await getGameData(
+                game["Game #"],
+                position,
+                date,
+                game["Home"],
+                game["Away"],
+                location,
+                field,
+                level
+            );
+
+            let idIfExists = await getAirtableGameID(game["Game #"]);
+            if (idIfExists) {
+                console.log("UPDATE: " + game["Game #"]);
+                gameData["id"] = idIfExists;
+                toUpdate.push(gameData);
+            } else {
+                console.log("CREATE: " + game["Game #"]);
+                toAdd.push(gameData);
+            }
         }
 
-        let locationFieldArray = game["Location"].split(" - ");
-        let location = locationFieldArray.shift().toProperCase();
-        let field = locationFieldArray.join(" - ");
-        let position = "4th Offical";
-        if (isThisOffical(game["Official 1"])) {
-            position = "Center";
-        } else if (isThisOffical(game["Official 2"])) {
-            position = "AR1";
-        } else if (isThisOffical(game["Official 3"])) {
-            position = "AR2";
+        console.log("Create: " + toAdd.length);
+        console.log("Update: " + toUpdate.length);
+
+        if (toAdd.length > 0) {
+            let toAddArrays = [];
+            while (toAdd.length > 10) {
+                toAddArrays.push(toAdd.splice(0, 10));
+            }
+            toAddArrays.push(toAdd);
+            for (const index in toAddArrays) {
+                console.log("Pushing create array " + index);
+                await base("Games").create(toAddArrays[index]);
+            }
         }
-        let date = new Date(
-            game["Date Time"].replace(datePattern, "20$3-$1-$2 $4:$5 $6") +
-                " GMT-0600"
-        );
 
-
-        let gameData = await getGameData(
-            game["Game #"],
-            position,
-            date,
-            game["Home"],
-            game["Away"],
-            location,
-            field
-        );
-
-        let idIfExists = await getAirtableGameID(game["Game #"]);
-        if (idIfExists) {
-            gameData["id"] = idIfExists;
-            toUpdate.push(gameData);
-        } else {
-            toAdd.push(gameData);
+        if (toUpdate.length > 0) {
+            let toUpdateArrays = [];
+            while (toUpdate.length > 10) {
+                toUpdateArrays.push(toUpdate.splice(0, 10));
+            }
+            toUpdateArrays.push(toUpdate);
+            for (const index in toUpdateArrays) {
+                console.log("Pushing update array" + index);
+                await base("Games").update(toUpdateArrays[index]);
+            }
         }
-        console.log("Got data for " + game["Game #"]);
+        console.log("Done");
+    } catch (e) {
+        console.log(e);
     }
-
-    if (toAdd.length > 0) {
-        await base("Games").create(toAdd);
-    }
-
-    if (toUpdate.length > 0) {
-        await base("Games").update(toUpdate);
-    }
-    console.log("Done");
-} catch (e) {
-    console.log(e)
 }
-}
-
 function isThisOffical(officalData) {
     return officalData
         .toLowerCase()
