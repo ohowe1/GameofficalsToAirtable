@@ -53,9 +53,10 @@ async function getAirtableGameID(gameId) {
 }
 
 async function getOrCreateTeam(teamName) {
+    console.log(teamName)
     let response = await base("Teams")
         .select({
-            filterByFormula: "{NAME} = '" + teamName + "'",
+            filterByFormula: "{Name} = \"" + teamName + "\"",
         })
         .all();
 
@@ -75,9 +76,10 @@ async function getOrCreateTeam(teamName) {
 }
 
 async function getOrCreateLocation(locationName) {
+    console.log(locationName)
     let response = await base("Locations")
         .select({
-            filterByFormula: "{NAME} = '" + locationName + "'",
+            filterByFormula: "{Name} = \"" + locationName + "\"",
         })
         .all();
 
@@ -97,6 +99,7 @@ async function getOrCreateLocation(locationName) {
 }
 
 async function processCSV(csvPath) {
+    try {
     let data = await csv().fromFile(csvPath);
     let toAdd = [];
     let toUpdate = [];
@@ -121,6 +124,7 @@ async function processCSV(csvPath) {
             game["Date Time"].replace(datePattern, "20$3-$1-$2 $4:$5 $6") +
                 " GMT-0600"
         );
+
 
         let gameData = await getGameData(
             game["Game #"],
@@ -150,6 +154,9 @@ async function processCSV(csvPath) {
         await base("Games").update(toUpdate);
     }
     console.log("Done");
+} catch (e) {
+    console.log(e)
+}
 }
 
 function isThisOffical(officalData) {
