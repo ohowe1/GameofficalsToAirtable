@@ -14,28 +14,35 @@ const base = new AirTable({ apiKey: config["api-key"] }).base(
 );
 
 const datePattern = /(\d{1,2})\/(\d{1,2})\/(\d{2}) (\d{1,2})\:(\d{1,2})(am|pm)/;
+const levelPattern = /(\d\d)/
 
 async function getGameData(
     gameId,
-    position,
     date,
     homeTeamName,
     awayTeamName,
     locationName,
     field,
-    level
+    level,
+    center,
+    ar1,
+    ar2,
+    fourth
 ) {
     const data = {
         fields: {
             "Game id": gameId,
-            Position: position,
             Date: date.toISOString(),
-            "Home Team": [await getOrCreateTeam(homeTeamName)],
-            "Away Team": [await getOrCreateTeam(awayTeamName)],
-            Location: [await getOrCreateLocation(locationName)],
+            "Home Team": [await getOrCreateFromTable(homeTeamName, "Teams")],
+            "Away Team": [await getOrCreateFromTable(awayTeamName, "Teams")],
+            Location: [await getOrCreateFromTable(locationName, "Locations")],
             Field: field,
             Level: level,
             "Added by CLI": true,
+            "Center Referee": (center ? [await getOrCreateReferee(center)] : []),
+            "Assistant Referee 1": (ar1 ? [await getOrCreateReferee(ar1)] : []),
+            "Assistant Referee 2": (ar2 ? [await getOrCreateReferee(ar2)] : []),
+            "4th Official": (fourth ? [await getOrCreateReferee(fourth)] : []),
         },
     };
 
@@ -55,10 +62,10 @@ async function getAirtableGameID(gameId) {
     return null;
 }
 
-async function getOrCreateTeam(teamName) {
-    let response = await base("Teams")
+async function getOrCreateFromTable(name, tableName) {
+    let response = await base(tableName)
         .select({
-            filterByFormula: 'UPPER({Name}) = UPPER("' + teamName + '")',
+            filterByFormula: 'UPPER({Name}) = UPPER("' + name + '")',
         })
         .all();
 
@@ -67,36 +74,22 @@ async function getOrCreateTeam(teamName) {
     }
 
     return (
-        await base("Teams").create([
+        await base(tableName).create([
             {
                 fields: {
-                    Name: teamName,
+                    Name: name,
                 },
             },
         ])
     )[0].getId();
 }
 
-async function getOrCreateLocation(locationName) {
-    let response = await base("Locations")
-        .select({
-            filterByFormula: 'UPPER({Name}) = UPPER("' + locationName + '")',
-        })
-        .all();
-
-    if (response.length >= 1) {
-        return response[0].getId();
+async function getOrCreateReferee(name) {
+    if (name == config["referee-name"]) {
+        return config["referee-table-you-id"];
     }
 
-    return (
-        await base("Locations").create([
-            {
-                fields: {
-                    Name: locationName,
-                },
-            },
-        ])
-    )[0].getId();
+    return getOrCreateFromTable(name, "Referees");
 }
 
 async function processCSV(csvPath) {
@@ -113,15 +106,12 @@ async function processCSV(csvPath) {
             let locationFieldArray = game["Location"].split(" - ");
             let location = locationFieldArray.shift().toProperCase();
             let field = locationFieldArray.join(" - ");
-            let level = game["Level"].split(" ")[0];
-            let position = "4th Offical";
-            if (isThisOffical(game["Official 1"])) {
-                position = "Center";
-            } else if (isThisOffical(game["Official 2"])) {
-                position = "AR1";
-            } else if (isThisOffical(game["Official 3"])) {
-                position = "AR2";
-            }
+            let level = "U" + game["Level"].match(levelPattern)[0]
+            let center = getOfficialName(game["Official 1"]);
+            let ar1 = getOfficialName(game["Official 2"]);
+            let ar2 = getOfficialName(game["Official 3"]);
+            let fourthOffical = getOfficialName(game["Official 4"]);
+
             let date = new Date(
                 game["Date Time"].replace(datePattern, "20$3-$1-$2 $4:$5 $6") +
                     " GMT-0600"
@@ -129,13 +119,16 @@ async function processCSV(csvPath) {
 
             let gameData = await getGameData(
                 game["Game #"],
-                position,
                 date,
                 game["Home"],
                 game["Away"],
                 location,
                 field,
-                level
+                level,
+                center,
+                ar1,
+                ar2,
+                fourthOffical
             );
 
             let idIfExists = await getAirtableGameID(game["Game #"]);
@@ -180,10 +173,11 @@ async function processCSV(csvPath) {
         console.log(e);
     }
 }
-function isThisOffical(officalData) {
-    return officalData
-        .toLowerCase()
-        .includes(config["referee-name"].toLowerCase());
+function getOfficialName(officialNameData) {
+    if ((officialNameData == "" || officialNameData.includes("[  TBD  ]") || officialNameData.includes("[ UNKNOWN - N/A ]"))) {
+        return null;
+    }
+    return officialNameData.slice(4).toProperCase().trim();
 }
 
 function convertXLSToCSV() {

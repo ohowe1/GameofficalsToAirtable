@@ -1,5 +1,7 @@
 {
     "api-key": "API Key",
     "base-id": "Base Key",
-    "referee-name": "Name"
+    "referee-name": "Name",
+    "referee-table-id": "id for your referee cell so it doesn't have to look it up everytime"
+
 }
